@@ -1,0 +1,28 @@
+name: moi
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  # Core scientific stack — all conda-forge
+  - numpy
+  - scipy
+  - pandas
+  - matplotlib
+  - statsmodels
+  - tifffile
+  - pillow
+  # Jupyter — all conda-forge
+  - jupyterlab
+  - notebook
+  - ipykernel
+  - ipywidgets
+  - ipympl
+  # Windows-specific glue — conda-forge has these
+  - pywin32
+  - pythonnet
+  # Pip layer for hardware/instrument bindings
+  - pip
+  - pip:
+    - PyVCAM
+    - PyVISA
+    - clr-loader

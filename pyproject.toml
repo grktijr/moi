@@ -1,0 +1,32 @@
+[project]
+name = "moi-control"
+version = "0.1.0"
+description = "Magneto-optical imaging acquisition and calibration for cryogenic SC experiments"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Ren" }
+]
+dependencies = [
+    "numpy>=1.24",
+    "tifffile>=2023.0",
+    "pyvisa>=1.13",
+    "pyvcam>=2.1",
+    "pandas>=2.0",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.7"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+moi-acquire = "moi_control.cli.acquire:main"
+moi-calibrate = "moi_control.cli.calibrate:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/moi_control"]

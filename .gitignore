@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+build/
+dist/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Data
+*.tif
+*.tiff
+*.csv
+*.json
+
+# (override the data ignore for calibration files in known locations if needed)
+!**/calibrations/*.json

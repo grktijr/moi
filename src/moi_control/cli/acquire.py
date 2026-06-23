@@ -20,7 +20,7 @@ from ..instruments.magnet import open_magnet
 from ..experiments import run_zfc, run_fc, run_tsweep, run_fczfc, run_calibration
 from ..postprocess import (
     process_divide, process_fc_divide_per_cycle,
-    process_fczfc_divide, process_fc_divide_and_scale_per_cycle,
+    process_fczfc_divide, process_divide_and_scale_per_cycle,
     apply_calibration,
 )
 from ..calibration_db import resolve_calibration_file
@@ -219,7 +219,7 @@ def main(argv=None) -> int:
             calibrated_dir = origin.parent / "calibrated"
 
             if run_cfg.scale_for_calibration and args.mode in ("fc", "fczfc"):
-                process_fc_divide_and_scale_per_cycle(origin, csv_path, cal_path)
+                process_divide_and_scale_per_cycle(origin, csv_path, cal_path, mode=args.mode)
                 source_dir = origin.parent / "multiplied"
             else:
                 source_dir = origin.parent / "divided"

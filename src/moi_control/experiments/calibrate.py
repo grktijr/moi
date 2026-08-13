@@ -40,13 +40,14 @@ from ..calibration_db import (
     write_calibration, ensure_calibration_dir, calibration_default_dir,
 )
 
+from .._paths import long_path
 
 # ----------------------------------------------------------------------------
 # Polynomial fitting with AIC auto-order
 # ----------------------------------------------------------------------------
 
 def fit_polynomial_with_aic(
-    I_ratio: np.ndarray, H_Oe: np.ndarray, max_order: int = 9,
+    I_ratio: np.ndarray, H_Oe: np.ndarray, max_order: int = 3,
 ) -> dict:
     """Fit polynomials of orders 1..max_order; return AIC-optimal fit + all fits.
 
@@ -175,7 +176,7 @@ def run_calibration(
     out_dir: Path, tag: str,
     coil_Oe_per_a: float,
     region_fraction: float = 0.5,
-    max_poly_order: int = 9,
+    max_poly_order: int = 3,
     calibration_save_dir: Optional[Path] = None,
 ) -> Path:
     """Run the two-pass calibration with live-plot supervision.
@@ -184,6 +185,12 @@ def run_calibration(
     plot window to abort the current sweep. Acquired data is preserved
     and processed normally regardless of when you abort.
     """
+    if I_max_neg_A > 0:
+        raise ValueError(
+            f"--I-max-neg must be a signed negative value for pass-2 negative sweep; "
+            f"got +{I_max_neg_A}. Try --I-max-neg -{I_max_neg_A}."
+        )
+    
     out_dir.mkdir(parents=True, exist_ok=True)
     original_dir = out_dir / "original"
     original_dir.mkdir(parents=True, exist_ok=True)
@@ -264,14 +271,21 @@ def run_calibration(
 
         # ---- Polarity switch (only if not aborted) --------------------------
         if not aborted_in_pass1:
-            print("\n" + "=" * 72)
-            print("MANUAL POLARITY SWITCH REQUIRED")
-            print("=" * 72)
-            print("  1. Disable the magnet output (or confirm I = 0)")
-            print("  2. Physically swap the coil leads to reverse polarity")
-            print("  3. Re-enable the magnet output if you disabled it")
-            print("=" * 72)
-            input("Press Enter when ready to resume with reversed polarity: ")
+            if ctrl.is_bipolar:
+                print("\n" + "=" * 72)
+                print("Pass 1 complete. Pass 2 will source negative current directly.")
+                print("Do NOT reverse coil leads.")
+                print("=" * 72)
+                input("Press Enter to continue: ")
+            else:
+                print("\n" + "=" * 72)
+                print("MANUAL POLARITY SWITCH REQUIRED")
+                print("=" * 72)
+                print("  1. Disable the magnet output (or confirm I = 0)")
+                print("  2. Physically swap the coil leads to reverse polarity")
+                print("  3. Re-enable the magnet output if you disabled it")
+                print("=" * 72)
+                input("Press Enter when ready to resume with reversed polarity: ")
 
             monitor.annotate_polarity_switch()
             # Reset the abort flag for pass 2 (user might want to abort that too)
@@ -281,7 +295,7 @@ def run_calibration(
             print(f"\n[calib] Pass 2: 0 → {I_max_neg_A:.4f} A "
                   f"(physically negative polarity)")
             print("       (press 'q' in the plot window to abort pass 2 early)")
-            pass2_currents = np.linspace(0, abs(I_max_neg_A), n_steps)
+            pass2_currents = np.linspace(0, I_max_neg_A, n_steps)
             for idx, I in enumerate(pass2_currents, start=1):
                 print(f"[calib pass2 {idx}/{n_steps}] I = {I:+.5f} A "
                       f"(physically {-I:+.5f} A)")
@@ -295,19 +309,19 @@ def run_calibration(
                 i_meas = ctrl.meas_current()
                 v_meas = ctrl.meas_voltage()
 
-                fname = f"pass2_{idx:03d}__Iset-{-I:+.5f}A.tif"
+                fname = f"pass2_{idx:03d}__Iset-{I:+.5f}A.tif"
                 tifffile.imwrite(original_dir / fname, img, photometric="minisblack")
 
                 pass2_records.append({
-                    "idx": idx, "pass": 2, "I_set_A": -float(I),
-                    "I_meas_A": (None if i_meas is None else -i_meas),
+                    "idx": idx, "pass": 2, "I_set_A": float(I),
+                    "I_meas_A": (None if i_meas is None else i_meas),
                     "V_meas_V": v_meas,
                     "filename": fname,
                     "image": img,
                 })
 
                 # Update plot — H is now negative
-                H_this = -float(I) * coil_Oe_per_a
+                H_this = float(I) * coil_Oe_per_a
                 this_intensity = average_central_region(
                     img.astype(np.float32), fraction=region_fraction
                 )
@@ -337,7 +351,7 @@ def run_calibration(
         raise RuntimeError("no points acquired — calibration has no data to process")
 
     ref_path = original_dir / pass1_records[0]["filename"]
-    ref_img = np.array(Image.open(ref_path)).astype(np.float32)
+    ref_img = np.array(Image.open(long_path(ref_path))).astype(np.float32)
     ref_intensity = average_central_region(ref_img, fraction=region_fraction)
     print(f"[calib] reference intensity (I=0): {ref_intensity:.1f} ADU")
 
@@ -346,7 +360,7 @@ def run_calibration(
     I_ratio = np.zeros_like(I_set)
 
     for i, rec in enumerate(all_records):
-        img = np.array(Image.open(original_dir / rec["filename"])).astype(np.float32)
+        img = np.array(Image.open(long_path(original_dir / rec["filename"]))).astype(np.float32)
         divided = img / np.maximum(ref_img, 1.0)
         tifffile.imwrite(divided_dir / f"divided_{rec['filename']}",
                          divided, photometric="minisblack")
@@ -403,15 +417,16 @@ def run_calibration(
         pass
 
     # Remind user to switch back to normal polarity
-    print("\n" + "=" * 72)
-    print("CALIBRATION COMPLETE — POLARITY REMINDER")
-    print("=" * 72)
-    print("  The magnet leads are currently in REVERSED polarity from pass 2.")
-    print("  Before running any measurement (zfc, fc, fczfc, tsweep):")
-    print("    1. Disable the magnet output (or confirm I = 0)")
-    print("    2. Swap the coil leads back to NORMAL polarity")
-    print("  Failure to do this will invert the sign of all measurement fields.")
-    print("=" * 72)
-    input("Press Enter once you have restored normal polarity: ")
+    if not ctrl.is_bipolar:
+        print("\n" + "=" * 72)
+        print("CALIBRATION COMPLETE — POLARITY REMINDER")
+        print("=" * 72)
+        print("  The magnet leads are currently in REVERSED polarity from pass 2.")
+        print("  Before running any measurement (zfc, fc, fczfc, tsweep):")
+        print("    1. Disable the magnet output (or confirm I = 0)")
+        print("    2. Swap the coil leads back to NORMAL polarity")
+        print("  Failure to do this will invert the sign of all measurement fields.")
+        print("=" * 72)
+        input("Press Enter once you have restored normal polarity: ")
 
     return json_path

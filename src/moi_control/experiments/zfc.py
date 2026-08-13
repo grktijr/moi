@@ -15,6 +15,8 @@ from ..config import CameraCfg, MagnetCfg, RunCfg
 from ..instruments.cryostat import Cryostation
 from ..instruments.magnet import MagnetControllerBase
 
+from .._paths import long_path
+
 
 def run_zfc(
     cam_cfg: CameraCfg, ctrl: MagnetControllerBase, mag_cfg: MagnetCfg,
@@ -56,7 +58,7 @@ def run_zfc(
     ctrl.set_current(0.0)
     ctrl.output_on()
 
-    with open(csv_path, "w", newline="") as csv_f:
+    with open(long_path(csv_path), "w", newline="") as csv_f:
         writer = csv.writer(csv_f)
         writer.writerow(CSV_COLUMNS)
 

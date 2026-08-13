@@ -7,15 +7,15 @@ $ErrorActionPreference = "Stop"
 # --------------------------------------------------------------------------
 # Common parameters (shared between calibration and measurement)
 # --------------------------------------------------------------------------
-$OutRoot       = "D:\Users\Ren\20260617\pair2\Area5-20x"
-$PSU           = "hp"
+$OutRoot       = "D:\Users\Ren\20260731\pair4\Area3-10x"
+$PSU           = "k6221_dc"
 $Tags          = "fczfc"
 
 $Binning       = @(2, 2)
-$ROI           = @(400, 400, 1600, 1600)
+$ROI           = @(800, 800, 800, 800)
 $ExposureMs    = 100
-$Navg          = 400
-$CoilOePerA    = 333.3
+$Navg          = 1600
+$CoilOePerA    = 10.0
 
 # Common temperatures
 $THigh         = 9.0
@@ -27,8 +27,8 @@ $TLow          = 3.5
 $CalibTag        = "calib_$(Get-Date -Format yyyyMMdd_HHmm)"
 $CalibOutDir     = Join-Path $OutRoot "calibration"
 $CalibSaveDir    = $CalibOutDir
-$CalibImaxPos    = 0.4    # A; covers ~133 Oe positive (more than 100 Oe sweep range)
-$CalibImaxNeg    = 0.2    # A; covers ~-133 Oe negative
+$CalibImaxPos    = 0.1    # A;
+$CalibImaxNeg    = -0.1    # A;
 $CalibNSteps     = 25     # points per polarity pass
 
 # Will be set after calibration completes; referenced in measurement loop
@@ -52,10 +52,11 @@ moi-calibrate `
     --I-max-neg    $CalibImaxNeg `
     --n-steps      $CalibNSteps `
     --exposure-ms  $ExposureMs `
-    --navg         8 `
+    --navg         20 `
     --binning      $Binning `
     --roi          $ROI `
     --coil-oe-per-a $CoilOePerA `
+    --max-poly-order 3 `
     --save-to      $CalibSaveDir
 
 if ($LASTEXITCODE -ne 0) {
@@ -83,50 +84,76 @@ Read-Host "Continue?"
 # --------------------------------------------------------------------------
 # Step 2: Run fczfc sweep with the just-created calibration
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Step 2: Run fczfc sweeps at each T_low for every run config
+# --------------------------------------------------------------------------
+$TLowList = @(3.5, 6.0, 7.5, 7.6, 7.7, 7.8, 7.9)
+
 $Runs = @(
-    @{ FCField =   0.0; Knots = @(0,   0); Nums = @(2); Cycles = 9 },
-    @{ FCField =   1.0; Knots = @(1,   0); Nums = @(2); Cycles = 9 },
-    @{ FCField =   2.0; Knots = @(2,   0); Nums = @(2); Cycles = 9 },
-    @{ FCField =   5.0; Knots = @(5,   0); Nums = @(2); Cycles = 9 },
-    @{ FCField =  10.0; Knots = @(10,  0); Nums = @(2); Cycles = 9 },
-    @{ FCField =  20.0; Knots = @(20,  0); Nums = @(2); Cycles = 9 },
-    @{ FCField =  50.0; Knots = @(50,  0); Nums = @(2); Cycles = 9 },
-    @{ FCField = 100.0; Knots = @(100, 0); Nums = @(2); Cycles = 9 }
+    @{ FCField =  -1.0; Knots = @(-1.0,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =  -0.9; Knots = @(-0.9,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =  -0.8; Knots = @(-0.8,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =  -0.7; Knots = @(-0.7,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =  -0.6; Knots = @(-0.6,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =  -0.5; Knots = @(-0.5,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =  -0.4; Knots = @(-0.4,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =  -0.3; Knots = @(-0.3,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =  -0.2; Knots = @(-0.2,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =  -0.1; Knots = @(-0.1,  -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =   0.0; Knots = @(0.0,   -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =   0.1; Knots = @(0.1,   -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =   0.2; Knots = @(0.2,   -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =   0.3; Knots = @(0.3,   -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =   0.4; Knots = @(0.4,   -0.42); Nums = @(2); Cycles = 1 },
+    @{ FCField =   0.5; Knots = @(0.5,   -0.42); Nums = @(2); Cycles = 1 }
 )
 
-foreach ($run in $Runs) {
-    $FCField = $run.FCField
-    $Knots   = $run.Knots
-    $Nums    = $run.Nums
-    $Cycles  = $run.Cycles
+$sweepAborted = $false
 
-    $tagT = "{0}_FC{1:N1}Oe_T{2:N2}K" -f $Tags, $FCField, $TLow
-    $outT = Join-Path $OutRoot $tagT
+foreach ($TLow in $TLowList) {
 
-    Write-Host "`n=== FCZFC: T_high=$THigh K, T_low=$TLow K, FC=$FCField Oe, cycles=$Cycles -> $outT ===" -ForegroundColor Cyan
+    Write-Host "`n############################################" -ForegroundColor Magenta
+    Write-Host "### T_low = $TLow K  ($($Runs.Count) runs)" -ForegroundColor Magenta
+    Write-Host "############################################" -ForegroundColor Magenta
 
-    moi-acquire fczfc `
-        --psu               $PSU `
-        --out               $outT `
-        --tag               $tagT `
-        --t-high            $THigh `
-        --t-low             $TLow `
-        --fc-field          $FCField `
-        --field-knots       $Knots `
-        --field-nums        $Nums `
-        --fczfc-cycles      $Cycles `
-        --binning           $Binning `
-        --roi               $ROI `
-        --exposure-ms       $ExposureMs `
-        --navg              $Navg `
-        --coil-oe-per-a     $CoilOePerA `
-        --apply-calibration `
-        --calibration-file  $CalibrationFile
+    foreach ($run in $Runs) {
+        $FCField = $run.FCField
+        $Knots   = $run.Knots
+        $Nums    = $run.Nums
+        $Cycles  = $run.Cycles
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "FCZFC at FC=$FCField Oe failed with exit code $LASTEXITCODE; stopping sweep."
-        break
+        $tagT = "{0}_FC{1:N2}Oe_T{2:N2}K" -f $Tags, $FCField, $TLow
+        $outT = Join-Path $OutRoot $tagT
+
+        Write-Host "`n=== FCZFC: T_high=$THigh K, T_low=$TLow K, FC=$FCField Oe, cycles=$Cycles -> $outT ===" -ForegroundColor Cyan
+
+        moi-acquire fczfc `
+            --psu               $PSU `
+            --out               $outT `
+            --tag               $tagT `
+            --t-high            $THigh `
+            --t-low             $TLow `
+            --fc-field          $FCField `
+            --field-knots       $Knots `
+            --field-nums        $Nums `
+            --fczfc-cycles      $Cycles `
+            --binning           $Binning `
+            --roi               $ROI `
+            --exposure-ms       $ExposureMs `
+            --navg              $Navg `
+            --coil-oe-per-a     $CoilOePerA `
+            --apply-calibration `
+            --calibration-file  $CalibrationFile `
+            --scale-for-calibration
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "FCZFC at T_low=$TLow K, FC=$FCField Oe failed with exit code $LASTEXITCODE; stopping sweep."
+            $sweepAborted = $true
+            break
+        }
     }
+
+    if ($sweepAborted) { break }
 }
 
 Write-Host "`n=== sweep complete ===" -ForegroundColor Green

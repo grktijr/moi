@@ -21,6 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+from ._paths import long_path
+
 
 # ----------------------------------------------------------------------------
 # Default storage location
@@ -116,13 +118,13 @@ def write_calibration(
         "data_points": data_points,
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w") as f:
+    with open(long_path(out_path), "w") as f:
         json.dump(payload, f, indent=2, default=str)
 
 
 def read_calibration(path: Path) -> Dict[str, Any]:
     """Load a calibration JSON file. Returns the raw dict."""
-    with open(path, "r") as f:
+    with open(long_path(path), "r") as f:
         return json.load(f)
 
 

@@ -25,6 +25,8 @@ from .instruments.cryostat import Cryostation
 from .instruments.magnet import MagnetControllerBase
 from .instruments.camera import PORT_NAME
 
+from ._paths import long_path
+
 
 # ----------------------------------------------------------------------------
 # CSV columns (single source of truth for all experiment modes)
@@ -178,9 +180,9 @@ def build_filename(
         f"__T-{T_plat_K:.3f}K",
     ]
     if B_meas_Oe is not None:
-        parts.append(f"__Bmeas-{B_meas_Oe:+.2f}Oe")
+        parts.append(f"__Bmeas-{B_meas_Oe:+.3f}Oe")
     parts += [
-        f"__Bset-{B_set_Oe:+.2f}Oe",
+        f"__Bset-{B_set_Oe:+.3f}Oe",
         f"__exp-{exposure_ms:g}ms",
         f"__bin-{bx}x{by}",
     ]
@@ -229,7 +231,7 @@ def acquire_one(
     )
     out_path = out_dir / fname
 
-    tifffile.imwrite(out_path, img, photometric="minisblack")
+    tifffile.imwrite(long_path(out_path), img, photometric="minisblack")
 
     bx, by = cam_cfg.binning
     if cam_cfg.roi is not None:

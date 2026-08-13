@@ -14,6 +14,8 @@ from ..config import CameraCfg, MagnetCfg, RunCfg
 from ..instruments.cryostat import Cryostation
 from ..instruments.magnet import MagnetControllerBase
 
+from .._paths import long_path
+
 
 def run_fc(
     cam_cfg: CameraCfg, ctrl: MagnetControllerBase, mag_cfg: MagnetCfg,
@@ -47,7 +49,7 @@ def run_fc(
 
     field_counts = {}   # tracks cycle index per field for filename tagging
 
-    with open(csv_path, "w", newline="") as csv_f:
+    with open(long_path(csv_path), "w", newline="") as csv_f:
         writer = csv.writer(csv_f)
         writer.writerow(CSV_COLUMNS)
 
@@ -81,7 +83,7 @@ def run_fc(
             # Image at T_high (above Tc, with field) — fc_high
             idx_high = (global_cyc - 1) * 2 + 1
             acquire_one(
-                idx=idx_high, phase=f"fc_high_B{B:+.2f}Oe", cycle=cyc,
+                idx=idx_high, phase=f"fc_high_B{B:+.3f}Oe", cycle=cyc,
                 cam_cfg=cam_cfg, ctrl=ctrl, mag_cfg=mag_cfg, cryo=cryo,
                 run_cfg=run_cfg,
                 B_set_Oe=float(B), I_target_A=I_target,

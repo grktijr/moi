@@ -48,7 +48,7 @@ class CameraCfg:
 @dataclass
 class MagnetCfg:
     """Magnet power supply (current source) configuration."""
-    controller: str = "keithley_2400"        # driver key (resolved by open_magnet)
+    controller: str = ""        # driver key (resolved by open_magnet)
     visa_resource: str = ""                  # VISA address string
     voltage_limit_v: float = 10.0
     current_limit_a: float = 1.0

@@ -23,6 +23,8 @@ from .calibration_db import (
     get_camera_config, calibration_is_compatible,
 )
 
+from ._paths import long_path
+
 
 # ----------------------------------------------------------------------------
 # ZFC / tsweep divide: divide all by image 001
@@ -41,13 +43,13 @@ def process_divide(origin_path: Path) -> None:
         print("[divide] no TIFFs found in", origin_path)
         return
 
-    base = np.array(Image.open(origin_files[0])).astype(np.float32)
+    base = np.array(Image.open(long_path(origin_files[0]))).astype(np.float32)
     eps = 1.0
     for f in origin_files:
-        img = np.array(Image.open(f)).astype(np.float32)
+        img = np.array(Image.open(long_path(f))).astype(np.float32)
         divided = img / np.maximum(base, eps)
         out_name = "divid " + os.path.basename(f)
-        Image.fromarray(divided).save(divided_path / out_name)
+        Image.fromarray(divided).save(long_path(divided_path / out_name))
     print(f"[divide] wrote {len(origin_files)} divided images to {divided_path}")
 
 
@@ -79,9 +81,9 @@ def process_fc_divide_per_cycle(origin_path: Path, csv_path: Path) -> None:
 
         try:
             high_img = np.array(Image.open(
-                origin_path / high_rows.iloc[0]["filename"])).astype(np.float32)
+                long_path(origin_path / high_rows.iloc[0]["filename"]))).astype(np.float32)
             low_img = np.array(Image.open(
-                origin_path / low_rows.iloc[0]["filename"])).astype(np.float32)
+                long_path(origin_path / low_rows.iloc[0]["filename"]))).astype(np.float32)
         except FileNotFoundError as e:
             print(f"[fc-divide] missing file for B={B_key} cyc={cyc}: {e}")
             n_skip += 1
@@ -90,7 +92,7 @@ def process_fc_divide_per_cycle(origin_path: Path, csv_path: Path) -> None:
         eps = 1.0
         ratio = low_img / np.maximum(high_img, eps)
         out_name = f"fc_div__" + low_rows.iloc[0]["filename"]
-        Image.fromarray(ratio).save(divided_path / out_name)
+        Image.fromarray(ratio).save(long_path(divided_path / out_name))
         n_done += 1
     print(f"[fc-divide done] {n_done} written, {n_skip} skipped")
 
@@ -182,7 +184,7 @@ def _scale_group(
     ref_filename = ref_rows.iloc[0]["filename"]
     try:
         ref_img = np.array(Image.open(
-            origin_path / ref_filename)).astype(np.float32)
+            long_path(origin_path / ref_filename))).astype(np.float32)
     except FileNotFoundError as e:
         print(f"[{mode}-scale] {label}: ref file missing: {e}")
         return 0, len(data_rows)
@@ -199,7 +201,7 @@ def _scale_group(
     for _, row in data_rows.iterrows():
         try:
             data_img = np.array(Image.open(
-                origin_path / row["filename"])).astype(np.float32)
+                long_path(origin_path / row["filename"]))).astype(np.float32)
         except FileNotFoundError as e:
             print(f"[{mode}-scale] {label}: data file missing: {e}")
             n_skip += 1
@@ -207,7 +209,7 @@ def _scale_group(
 
         scaled = (data_img / np.maximum(ref_img, eps)) * multiplier
         out_name = row["filename"]
-        Image.fromarray(scaled).save(multiplied_path / out_name)
+        Image.fromarray(scaled).save(long_path(multiplied_path / out_name))
         n_done += 1
 
     return n_done, n_skip
@@ -224,7 +226,7 @@ def process_fczfc_divide(origin_path: Path, csv_path: Path) -> None:
             n_skip += len(group); continue
         ref_file = origin_path / ref_rows.iloc[0]["filename"]
         try:
-            ref_img = np.array(Image.open(ref_file)).astype(np.float32)
+            ref_img = np.array(Image.open(long_path(ref_file))).astype(np.float32)
         except FileNotFoundError:
             n_skip += len(group); continue
         eps = 1.0
@@ -232,10 +234,10 @@ def process_fczfc_divide(origin_path: Path, csv_path: Path) -> None:
             img_path = origin_path / row["filename"]
             if not img_path.exists():
                 n_skip += 1; continue
-            img = np.array(Image.open(img_path)).astype(np.float32)
+            img = np.array(Image.open(long_path(img_path))).astype(np.float32)
             divided = img / np.maximum(ref_img, eps)
             Image.fromarray(divided).save(
-                divided_path / ("fczfc_div__" + row["filename"])
+                long_path(divided_path / ("fczfc_div__" + row["filename"]))
             )
             n_done += 1
     print(f"[fczfc-divide] wrote {n_done}, skipped {n_skip}")
@@ -304,11 +306,11 @@ def apply_calibration(
 
     n_done = 0
     for img_path in source_files:
-        ratio = np.array(Image.open(img_path)).astype(np.float32)
+        ratio = np.array(Image.open(long_path(img_path))).astype(np.float32)
         H_map = np.zeros_like(ratio, dtype=np.float32)
         for power, c in enumerate(active_coeffs):
             H_map += c * (ratio ** power)
-        tifffile.imwrite(output_dir / img_path.name, H_map,
+        tifffile.imwrite(long_path(output_dir / img_path.name), H_map,
                          photometric="minisblack")
         n_done += 1
 

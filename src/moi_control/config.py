@@ -50,7 +50,7 @@ class MagnetCfg:
     """Magnet power supply (current source) configuration."""
     controller: str = ""        # driver key (resolved by open_magnet)
     visa_resource: str = ""                  # VISA address string
-    voltage_limit_v: float = 10.0
+    voltage_limit_v: float = 20.0
     current_limit_a: float = 1.0
     ramp_step_a: float = 0.005
     ramp_step_delay_s: float = 0.02
@@ -76,7 +76,7 @@ class RunCfg:
     zfc_field_nums: Tuple[int, ...]   = (16,)
 
     # FC fields and cycles
-    fc_fields_Oe: Tuple[float, ...] = ()
+    fc_field_Oe: Optional[float] = None
     fc_cycles: int = 1
 
     # FCZFC field and cycles:
@@ -86,10 +86,6 @@ class RunCfg:
     fczfc_cycles: int = 1
 
     # T-sweep
-    tsweep_t_knots: Tuple[float, ...] = (4.0, 12.0)
-    tsweep_t_nums:  Tuple[int, ...]   = (16,)
-    tsweep_field_Oe: float = 0.0
-    tsweep_prep_K:  Optional[float] = None
 
     # Post-processing flags
     do_divide: bool = True
@@ -100,3 +96,36 @@ class RunCfg:
     apply_calibration: bool = False
     calibration_file: Optional[Path] = None
     scale_for_calibration: bool = False
+
+    # AC field (for fc mode with the Keithley 6221 AC driver).
+    # When ac_amplitude_a is set (> 0) and the PSU is k6221_ac, the FC field
+    # becomes DC-offset + AC modulation: each fc field value is the DC offset,
+    # and the AC waveform runs throughout the high-T image, cooldown, and
+    # low-T image.
+    ac_amplitude_Oe: Optional[float] = None   # AC peak amplitude in Oe; None = DC-only
+    ac_frequency_hz: float = 1000.0          # AC frequency in Hz
+    ac_shape: str = "SQU"                    # SIN | SQU | TRI | RAMP
+
+    # fc_acsweep: internal sweep of one AC axis at low-T, one high-T base.
+    acsweep_axis: str = "amp"                # "amp" | "freq" — which axis to sweep
+    acsweep_offset_Oe: float = 0.0           # DC offset (Oe) = the static FC field
+    acsweep_amp_Oe: Optional[float] = None   # fixed amplitude (Oe) when sweeping freq
+    acsweep_freq_hz: float = 1000.0          # fixed frequency (Hz) when sweeping amp
+    acsweep_values: Tuple[float, ...] = ()   # swept-axis values (Oe for amp, Hz for freq)
+    acsweep_cool_amp_a: float = 1.1e-4         # near-DC cool amplitude in A (range floor)
+    acsweep_cool_freq_hz: float = 0.001        # near-DC cool/base frequency (Hz); very slow = quasi-static
+    acsweep_dwell_s: float = 5.0             # seconds to apply AC at each anchor before imaging
+    acsweep_range_a: Optional[float] = None  # pinned current range in A (None = derive)
+
+    # fc_sample_acsweep: DC field (magnet, fc-style) + AC sample current (2nd 6221).
+    use_sample_source: bool = False
+    sample_source_visa: str = "GPIB0::29::INSTR"
+    sample_source_range_a: Optional[float] = None
+    sample_axis: str = "amp"              # "amp" | "freq"
+    sample_amp_mA: Optional[float] = None # fixed amplitude (mA) when sweeping freq
+    sample_freq_hz: float = 1000.0        # fixed frequency (Hz) when sweeping amp
+    sample_values: Tuple[float, ...] = () # swept values: mA for amp, Hz for freq
+    sample_shape: str = "SIN"
+    sample_dwell_s: float = 5.0
+    sample_freq_settle_s: float = 0.5
+    sample_offset_mA: Optional[float] = None

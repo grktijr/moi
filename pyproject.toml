@@ -23,6 +23,11 @@ dev = ["pytest>=7.0"]
 [project.scripts]
 moi-acquire = "moi_control.cli.acquire:main"
 moi-calibrate = "moi_control.cli.calibrate:main"
+moi-snap = "moi_control.cli.snap:main"
+moi-cryo = "moi_control.cli.cryo:main"
+moi-stack = "moi_control.cli.stack:main"
+moi-rt = "moi_control.cli.rt:main"
+moi-iv = "moi_control.cli.iv:main"
 
 [build-system]
 requires = ["hatchling"]

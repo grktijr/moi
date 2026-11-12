@@ -232,9 +232,10 @@ def process_fczfc_divide(origin_path: Path, csv_path: Path) -> None:
         eps = 1.0
         for _, row in group[group["phase"] == "fczfc"].iterrows():
             img_path = origin_path / row["filename"]
-            if not img_path.exists():
+            try:
+                img = np.array(Image.open(long_path(img_path))).astype(np.float32)
+            except FileNotFoundError:
                 n_skip += 1; continue
-            img = np.array(Image.open(long_path(img_path))).astype(np.float32)
             divided = img / np.maximum(ref_img, eps)
             Image.fromarray(divided).save(
                 long_path(divided_path / ("fczfc_div__" + row["filename"]))

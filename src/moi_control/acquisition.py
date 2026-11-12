@@ -39,6 +39,9 @@ CSV_COLUMNS = [
     "exp_ms", "bin_x", "bin_y", "navg",
     "roi_x", "roi_y", "roi_w", "roi_h",
     "src", "idn", "filename",
+    "ac_amp_Oe", "ac_freq_Hz", "ac_shape", "ac_dwell_s",
+    "sample_amp_mA", "sample_freq_Hz",
+    "sample_V", "sample_R_ohm",
 ]
 
 
@@ -79,7 +82,7 @@ def acquire_avg_sequence(cam_cfg: CameraCfg, exp_ms: int, navg: int) -> np.ndarr
             timeout_ms = int(20000 + exp_ms * 5)   # per-frame, not per-sequence
             stack = cam.get_sequence(navg, timeout_ms=timeout_ms)
 
-            avg = stack.astype(np.float32).mean(axis=0)
+            avg = stack.mean(axis=0, dtype=np.float32)
             if np.issubdtype(stack.dtype, np.integer):
                 avg = np.clip(np.rint(avg), 0, np.iinfo(stack.dtype).max).astype(stack.dtype)
             if attempt > 0:
@@ -168,6 +171,8 @@ def build_filename(
     I_target_A: float, I_meas_A: Optional[float], V_meas_V: Optional[float],
     exposure_ms: int, binning: Tuple[int, int],
     roi: Optional[Tuple[int, int, int, int]],
+    ac_amp_Oe=None, ac_freq_Hz=None, ac_shape=None,
+    sample_amp_mA=None, sample_freq_Hz=None,
     timestamp: Optional[str] = None,
     extension: str = ".tif",
 ) -> str:
@@ -176,15 +181,22 @@ def build_filename(
     parts = [
         f"{idx:03d}",
         f"__{phase}",
-        f"__cycle-{cycle:02d}",
         f"__T-{T_plat_K:.3f}K",
     ]
+    if ac_amp_Oe is not None:
+        parts.append(f"__ACamp-{ac_amp_Oe:+.3f}Oe")
+        parts.append(f"__ACfreq-{ac_freq_Hz:g}Hz")
+        parts.append(f"__AC{ac_shape}")
+    if sample_amp_mA is not None:
+        parts.append(f"__SMPamp-{sample_amp_mA:+.3f}mA")
+        parts.append(f"__SMPfreq-{sample_freq_Hz:g}Hz")
     if B_meas_Oe is not None:
         parts.append(f"__Bmeas-{B_meas_Oe:+.3f}Oe")
     parts += [
         f"__Bset-{B_set_Oe:+.3f}Oe",
         f"__exp-{exposure_ms:g}ms",
         f"__bin-{bx}x{by}",
+        f"__cycle-{cycle:02d}",
     ]
     if roi is not None:
         rx, ry, rw, rh = roi
@@ -210,16 +222,35 @@ def acquire_one(
     run_cfg: RunCfg,
     B_set_Oe: float, I_target_A: float,
     out_dir: Path, csv_writer, csv_f,
+    ac_amp_Oe_override: float | None = None,
+    ac_freq_Hz_override: float | None = None,
+    ac_dwell_s: float | None = None,
+    sample_amp_mA: float | None = None,
+    sample_freq_Hz: float | None = None,
+    voltmeter=None,
+    sample_current_a: float | None = None,
 ) -> Path:
     """Acquire one averaged image and append a CSV row for it.
 
     Returns the path of the saved TIFF.
     """
     cryo_state = cryo.read_state()
+    # Per-call AC overrides (used by AC sweeps where amp/freq vary per row);
+    # fall back to the run-level AC config.
+    ac_amp_eff = (ac_amp_Oe_override if ac_amp_Oe_override is not None
+                  else run_cfg.ac_amplitude_Oe)
+    ac_freq_eff = (ac_freq_Hz_override if ac_freq_Hz_override is not None
+                   else run_cfg.ac_frequency_hz)
     img = acquire_avg_sequence(cam_cfg, cam_cfg.exposure_ms, cam_cfg.navg)
     i_meas = ctrl.meas_current()
     v_meas = ctrl.meas_voltage()
     B_meas_Oe = (i_meas * run_cfg.coil_Oe_per_a) if i_meas is not None else None  # currently we don't measure field directly
+    # Optional 2182A sample voltage / resistance (R = V / I_sample).
+    sample_V = sample_R = None
+    if voltmeter is not None:
+        sample_V = voltmeter.read_voltage()
+        if sample_V is not None and sample_current_a not in (None, 0.0):
+            sample_R = sample_V / sample_current_a
 
     fname = build_filename(
         idx=idx, phase=phase, cycle=cycle,
@@ -228,6 +259,11 @@ def acquire_one(
         I_target_A=I_target_A, I_meas_A=i_meas, V_meas_V=v_meas,
         exposure_ms=cam_cfg.exposure_ms, binning=cam_cfg.binning,
         roi=cam_cfg.roi,
+        ac_amp_Oe=ac_amp_eff,       # None for DC → no tokens
+        ac_freq_Hz=ac_freq_eff,
+        ac_shape=run_cfg.ac_shape,
+        sample_amp_mA=sample_amp_mA,
+        sample_freq_Hz=sample_freq_Hz,
     )
     out_path = out_dir / fname
 
@@ -253,6 +289,15 @@ def acquire_one(
         cam_cfg.exposure_ms, bx, by, cam_cfg.navg,
         rx, ry, rw, rh,
         phase, ctrl.idn(), out_path.name,
+        # AC fields (empty/N/A when not an AC run); effective per-row values
+        ("" if ac_amp_eff is None else f"{ac_amp_eff:+.4f}"),
+        ("" if ac_amp_eff is None else f"{ac_freq_eff:.1f}"),
+        ("" if ac_amp_eff is None else run_cfg.ac_shape),
+        ("" if ac_dwell_s is None else f"{ac_dwell_s:.2f}"),
+        ("" if sample_amp_mA is None else f"{sample_amp_mA:+.4f}"),
+        ("" if sample_freq_Hz is None else f"{sample_freq_Hz:.1f}"),
+        ("" if sample_V is None else f"{sample_V:+.9f}"),
+        ("" if sample_R is None else f"{sample_R:+.6f}"),
     ])
     csv_f.flush()
     print(f"  saved: {out_path.name}")

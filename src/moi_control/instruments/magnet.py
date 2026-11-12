@@ -8,6 +8,8 @@ string to the right class.
 
 from __future__ import annotations
 
+import time
+
 from typing import Optional, Tuple
 
 import pyvisa
@@ -20,6 +22,7 @@ class MagnetControllerBase:
     
     # Subclasses override this to declare bipolar capability
     is_bipolar: bool = False
+    supports_ac: bool = False
     
     def __init__(self, inst):
         self.inst = inst
@@ -250,39 +253,52 @@ class Keithley6221AC(MagnetControllerBase):
     Calling set_current() on this class sets the DC offset of the waveform.
     The AC amplitude is set separately via set_ac_waveform().
     """
+    is_bipolar = True
+    supports_ac = True
 
     def __init__(self, inst, current_range_a: float | None = None):
         super().__init__(inst)
         self.inst.write("*RST")
+        self.inst.query("*OPC?")          # let reset finish before configuring
         self.inst.write("*CLS")
-        if current_range_a is None:
-            self.inst.write("SOUR:CURR:RANG:AUTO ON")
-        else:
-            self.inst.write("SOUR:CURR:RANG:AUTO OFF")
-            self.inst.write(f"SOUR:CURR:RANG {current_range_a:.6f}")
-        # Default waveform parameters; experiments will override via
-        # set_ac_waveform before output_on
+        self._range_a = current_range_a   # kept for WAVE:RANG selection
+        # Seed default waveform parameters; experiments override via
+        # set_ac_waveform before output_on. RANG BEST lets the waveform
+        # generator pick a range that fits the amplitude (otherwise the
+        # amplitude can clamp to 0).
         self.inst.write("SOUR:WAVE:FUNC SIN")
-        self.inst.write("SOUR:WAVE:FREQ 1000")
-        self.inst.write("SOUR:WAVE:AMPL 1e-3")
+        self.inst.write("SOUR:WAVE:FREQ 1e-3")
+        self.inst.write("SOUR:WAVE:AMPL 1e-4")
         self.inst.write("SOUR:WAVE:OFFS 0.0")
+        self.inst.write("SOUR:WAVE:RANG BEST")
         self.inst.write("SOUR:WAVE:DUR:TIME INF")
-
+        self.inst.query("*OPC?")          # config settled
+        # Tracked waveform state. A re-arm re-latches ALL parameters from
+        # scratch, so every re-arm must re-write offset+amplitude+frequency+
+        # function together (the verified test re-wrote offset with amplitude);
+        # writing only the changed one loses the others. _rearm() does this.
+        self._shape = "SIN"
+        self._freq_hz = 1e-3
+        self._amplitude_a = 1e-4
+        self._offset_a = 0.0
+ 
     def set_voltage_limit(self, v: float) -> None:
         self.inst.write(f"SOUR:CURR:COMP {v:.4f}")
-
+ 
     def _write_current(self, i: float) -> None:
         """Set the DC offset of the AC waveform."""
         self.inst.write(f"SOUR:WAVE:OFFS {i:.6f}")
-
+ 
     def set_ac_waveform(
         self,
+        range_a: float,
+        offset_a: float,
         amplitude_a: float,
         freq_hz: float,
         shape: str = "SIN",
     ) -> None:
         """Configure the AC waveform. Call before output_on().
-
+ 
         Parameters
         ----------
         amplitude_a : float
@@ -294,26 +310,105 @@ class Keithley6221AC(MagnetControllerBase):
         """
         if shape not in ("SIN", "SQU", "TRI", "RAMP"):
             raise ValueError(f"unsupported waveform shape: {shape}")
+        self._shape = shape
+        self._freq_hz = freq_hz
+        self._range_a = range_a
+        self._amplitude_a = amplitude_a
+        self._offset_a = offset_a
         self.inst.write(f"SOUR:WAVE:FUNC {shape}")
         self.inst.write(f"SOUR:WAVE:FREQ {freq_hz:.6f}")
         self.inst.write(f"SOUR:WAVE:AMPL {amplitude_a:.6e}")
+        self.inst.write(f"SOUR:WAVE:OFFS {offset_a:.6f}")
+        # NOTE: RANG BEST is fine here (pre-arm config). For sweeps that change
+        # amplitude after arming, pin the range with set_wave_range() first so
+        # a re-arm never crosses a range boundary.
+        if self._range_a is None:
+            self.inst.write("SOUR:WAVE:RANG BEST")
+        else:
+            self.inst.write(f"SOUR:CURR:RANG {range_a:.6f}")
+            self.inst.write(f"SOUR:WAVE:RANG FIX")
+        self.inst.write("SOUR:WAVE:DUR:TIME INF")
+        self.inst.query("*OPC?")                 # params stored before arm
 
+    def set_dc_offset(self, offset_a: float) -> None:
+        """Set the DC offset of the waveform and (re)arm it.
+
+        OFFSET IS LATCHED at arm time on this 6221 (verified): a bare
+        SOUR:WAVE:OFFS write on a running waveform is ignored, so offset
+        changes must abort -> write -> re-arm, with no *OPC? between the OFFS
+        write and ARM (an intervening *OPC? flushes the staged offset).
+
+        Amplitude and frequency are re-written here too so a re-arm doesn't
+        drop them (a re-arm re-latches all params from scratch).
+        """
+        self._offset_a = offset_a
+        self.inst.write("SOUR:WAVE:ABOR")
+        time.sleep(0.2)
+        self.inst.write(f"SOUR:WAVE:FUNC {self._shape}")
+        self.inst.write(f"SOUR:WAVE:FREQ {self._freq_hz:.6f}")
+        self.inst.write(f"SOUR:WAVE:AMPL {self._amplitude_a:.6e}")
+        self.inst.write(f"SOUR:WAVE:OFFS {offset_a:.6f}")
+        self.inst.write("SOUR:WAVE:ARM")
+        self.inst.write("SOUR:WAVE:INIT")
+
+    def set_ac_amplitude(self, amplitude_a: float) -> None:
+        """Change AC amplitude on a RUNNING waveform with a bare write.
+
+        AMPLITUDE IS HOT-CHANGEABLE on this 6221 (verified): writing
+        SOUR:WAVE:AMPL takes effect immediately on the running waveform, with
+        offset and frequency undisturbed and NO re-arm. Pin the range with
+        set_wave_range() before a sweep so the amplitude never crosses a range
+        boundary (which would itself force a re-arm).
+        """
+        self._amplitude_a = amplitude_a
+        self.inst.write(f"SOUR:WAVE:AMPL {amplitude_a:.6e}")
+
+    def set_ac_frequency(self, freq_hz: float) -> None:
+        """Change AC frequency on a RUNNING waveform with a bare write.
+
+        Treated as hot-changeable like amplitude (SOUR:WAVE:FREQ on the
+        running waveform). If a future test shows frequency is latched,
+        change this to the abort/re-arm form used by set_dc_offset.
+        """
+        self._freq_hz = freq_hz
+        self.inst.write(f"SOUR:WAVE:FREQ {freq_hz:.6f}")
+
+    def set_wave_range(self, range_a: float) -> None:
+        """Pin the waveform current range (disables auto/BEST ranging).
+
+        Call before an amplitude sweep so raising the amplitude never crosses
+        a range boundary (which would force an extra re-arm). range_a must
+        cover |offset| + max amplitude, within the 6221's 105% headroom.
+        """
+        self._range_a = range_a
+        self.inst.write("SOUR:CURR:RANG:AUTO OFF")
+        self.inst.write(f"SOUR:CURR:RANG {range_a:.6f}")
+        self.inst.write(f"SOUR:WAVE:RANG FIX")
+ 
     def meas_current(self) -> float | None:
         # Like the DC class, no actual measurement available.
         # In AC mode, the "level" query doesn't apply; return None.
         return None
-
+ 
     def meas_voltage(self) -> float | None:
         return None
-
+ 
     def output_on(self) -> None:
-        """Arm the waveform and start output."""
+        """Arm the waveform (wait for arming), then start it.
+ 
+        Uses SOUR:WAVE:INIT (the waveform-generator initiate), not the
+        generic INIT:IMM, and an *OPC? barrier after ARM. This matches the
+        sequence verified to start the waveform on this 6221; INIT:IMM
+        initiates the trigger model instead and leaves the wave at 0.
+        """
         self.inst.write("SOUR:WAVE:ARM")
-        self.inst.write("INIT:IMM")
-
+        self.inst.query("*OPC?")          # arming complete before init
+        self.inst.write("SOUR:WAVE:INIT")
+ 
     def output_off(self) -> None:
         """Abort the waveform and disable output."""
         self.inst.write("SOUR:WAVE:ABOR")
+        time.sleep(0.2)                   # let abort unwind (no *OPC? on INF wave)
         self.inst.write("OUTP OFF")
 
 # ----------------------------------------------------------------------------
@@ -347,4 +442,27 @@ def open_magnet(cfg: MagnetCfg) -> Tuple[MagnetControllerBase, pyvisa.ResourceMa
         rm.close()
         raise ValueError(f"unknown magnet controller: {cfg.controller}")
 
+    return ctrl, rm
+
+
+def open_sample_source(visa_resource: str, current_range_a: float | None = None,
+                       driver: str = "ac"
+                       ) -> Tuple[MagnetControllerBase, pyvisa.ResourceManager]:
+    """Open a second 6221 as a direct current source into the sample
+    (not a magnet/field source).
+ 
+    driver="ac" -> Keithley6221AC (waveform mode, for AC sample sweeps).
+    driver="dc" -> Keithley6221DC (plain DC source, for DC pulse trains / I-V).
+ 
+    Returns (driver, resource_manager).
+    """
+    rm = pyvisa.ResourceManager()
+    inst = rm.open_resource(visa_resource)
+    if driver == "dc":
+        ctrl: MagnetControllerBase = Keithley6221DC(inst, current_range_a=current_range_a)
+    elif driver == "ac":
+        ctrl = Keithley6221AC(inst, current_range_a=current_range_a)
+    else:
+        rm.close()
+        raise ValueError(f"unknown sample source driver: {driver!r}")
     return ctrl, rm
